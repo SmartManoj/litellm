@@ -32,7 +32,7 @@ from litellm.types.utils import StandardKeyGenerationConfig
 import httpx
 import dotenv
 from enum import Enum
-from litellm._version import __version__
+from litellm._version import version as __version__
 
 litellm_mode = os.getenv("LITELLM_MODE", "DEV")  # "PRODUCTION", "DEV"
 if litellm_mode == "DEV":

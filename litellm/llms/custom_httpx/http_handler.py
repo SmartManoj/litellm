@@ -15,10 +15,7 @@ if TYPE_CHECKING:
 else:
     LlmProviders = Any
 
-try:
-    from litellm._version import version
-except Exception:
-    version = "0.0.0"
+from litellm._version import version
 
 headers = {
     "User-Agent": f"litellm/{version}",

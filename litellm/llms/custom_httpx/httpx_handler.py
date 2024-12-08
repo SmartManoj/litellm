@@ -2,10 +2,7 @@ from typing import Optional
 
 import httpx
 
-try:
-    from litellm._version import version
-except Exception:
-    version = "0.0.0"
+from litellm._version import version
 
 headers = {
     "User-Agent": f"litellm/{version}",

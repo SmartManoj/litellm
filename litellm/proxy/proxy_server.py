@@ -274,10 +274,7 @@ from litellm.types.router import RouterGeneralSettings
 from litellm.types.utils import StandardLoggingPayload
 from litellm.utils import get_end_user_id_for_cost_tracking
 
-try:
-    from litellm._version import version
-except Exception:
-    version = "0.0.0"
+from litellm._version import version
 litellm.suppress_debug_info = True
 import json
 from typing import Union
