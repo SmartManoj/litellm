@@ -6,12 +6,27 @@ import { CountryCell } from "./country_cell";
 import { getProviderLogoAndName } from "../provider_info_helpers";
 import { Tooltip } from "antd";
 import { TimeCell } from "./time_cell";
+import { Button } from "@tremor/react";
+
+// Helper to get the appropriate logo URL
+const getLogoUrl = (
+  row: LogEntry,
+  provider: string
+) => {
+  // Check if mcp_tool_call_metadata exists and contains mcp_server_logo_url
+  if (row.metadata?.mcp_tool_call_metadata?.mcp_server_logo_url) {
+    return row.metadata.mcp_tool_call_metadata.mcp_server_logo_url;
+  }
+  // Fall back to default provider logo
+  return provider ? getProviderLogoAndName(provider).logo : '';
+};
 
 export type LogEntry = {
   request_id: string;
   api_key: string;
   team_id: string;
   model: string;
+  model_id: string;
   api_base?: string;
   call_type: string;
   spend: number;
@@ -30,6 +45,10 @@ export type LogEntry = {
   requester_ip_address?: string;
   messages: string | any[] | Record<string, any>;
   response: string | any[] | Record<string, any>;
+  proxy_server_request?: string | any[] | Record<string, any>;
+  session_id?: string;
+  onKeyHashClick?: (keyHash: string) => void;
+  onSessionClick?: (sessionId: string) => void;
 };
 
 export const columns: ColumnDef<LogEntry>[] = [
@@ -37,18 +56,47 @@ export const columns: ColumnDef<LogEntry>[] = [
     id: "expander",
     header: () => null,
     cell: ({ row }) => {
-      return row.getCanExpand() ? (
-        <button
-          {...{
-            onClick: row.getToggleExpandedHandler(),
-            style: { cursor: "pointer" },
-          }}
-        >
-          {row.getIsExpanded() ? "▼" : "▶"}
-        </button>
-      ) : (
-        "●"
-      );
+      // Convert the cell function to a React component to properly use hooks
+      const ExpanderCell = () => {
+        const [localExpanded, setLocalExpanded] = React.useState(row.getIsExpanded());
+
+        // Memoize the toggle handler to prevent unnecessary re-renders
+        const toggleHandler = React.useCallback(() => {
+          setLocalExpanded((prev) => !prev);
+          row.getToggleExpandedHandler()();
+        }, [row]);
+
+        return row.getCanExpand() ? (
+          <button
+            onClick={toggleHandler}
+            style={{ cursor: "pointer" }}
+            aria-label={localExpanded ? "Collapse row" : "Expand row"}
+            className="w-6 h-6 flex items-center justify-center focus:outline-none"
+          >
+            <svg
+              className={`w-4 h-4 transform transition-transform duration-75 ${
+                localExpanded ? 'rotate-90' : ''
+              }`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M9 5l7 7-7 7"
+              />
+            </svg>
+          </button>
+        ) : (
+          <span className="w-6 h-6 flex items-center justify-center">●</span>
+        );
+      };
+
+      // Return the component
+      return <ExpanderCell />;
     },
   },
   {
@@ -75,11 +123,32 @@ export const columns: ColumnDef<LogEntry>[] = [
     },
   },
   {
+    header: "Session ID",
+    accessorKey: "session_id",
+    cell: (info: any) => {
+      const value = String(info.getValue() || "");
+      const onSessionClick = info.row.original.onSessionClick;
+      return (
+        <Tooltip title={String(info.getValue() || "")}>
+        <Button 
+          size="xs"
+          variant="light"
+          className="font-mono text-blue-500 bg-blue-50 hover:bg-blue-100 text-xs font-normal text-xs max-w-[15ch] truncate block"
+          onClick={() => onSessionClick?.(value)}
+        >
+          {String(info.getValue() || "")}
+        </Button>
+      </Tooltip>
+      );
+    },
+  },
+  
+  {
     header: "Request ID",
     accessorKey: "request_id",
     cell: (info: any) => (
       <Tooltip title={String(info.getValue() || "")}>
-        <span className="font-mono text-xs max-w-[100px] truncate block">
+        <span className="font-mono text-xs max-w-[15ch] truncate block">
           {String(info.getValue() || "")}
         </span>
       </Tooltip>
@@ -93,23 +162,29 @@ export const columns: ColumnDef<LogEntry>[] = [
     ),
   },
   {
-    header: "Country",
-    accessorKey: "requester_ip_address",
-    cell: (info: any) => <CountryCell ipAddress={info.getValue()} />,
-  },
-  {
     header: "Team Name",
     accessorKey: "metadata.user_api_key_team_alias",
-    cell: (info: any) => <span>{String(info.getValue() || "-")}</span>,
+    cell: (info: any) => (
+      <Tooltip title={String(info.getValue() || "-")}>
+        <span className="max-w-[15ch] truncate block">{String(info.getValue() || "-")}</span>
+      </Tooltip>
+    ),
   },
   {
     header: "Key Hash",
     accessorKey: "metadata.user_api_key",
     cell: (info: any) => {
       const value = String(info.getValue() || "-");
+      const onKeyHashClick = info.row.original.onKeyHashClick;
+
       return (
         <Tooltip title={value}>
-          <span className="font-mono">{value.slice(0, 5)}...</span>
+          <span 
+            className="font-mono max-w-[15ch] truncate block cursor-pointer hover:text-blue-600"
+            onClick={() => onKeyHashClick?.(value)}
+          >
+            {value}
+          </span>
         </Tooltip>
       );
     },
@@ -117,7 +192,11 @@ export const columns: ColumnDef<LogEntry>[] = [
   {
     header: "Key Name",
     accessorKey: "metadata.user_api_key_alias",
-    cell: (info: any) => <span>{String(info.getValue() || "-")}</span>,
+    cell: (info: any) => (
+      <Tooltip title={String(info.getValue() || "-")}>
+        <span className="max-w-[15ch] truncate block">{String(info.getValue() || "-")}</span>
+      </Tooltip>
+    ),
   },
   {
     header: "Model",
@@ -130,7 +209,7 @@ export const columns: ColumnDef<LogEntry>[] = [
         <div className="flex items-center space-x-2">
           {provider && (
             <img
-              src={getProviderLogoAndName(provider).logo}
+              src={getLogoUrl(row, provider)}
               alt=""
               className="w-4 h-4"
               onError={(e) => {
@@ -140,7 +219,7 @@ export const columns: ColumnDef<LogEntry>[] = [
             />
           )}
           <Tooltip title={modelName}>
-            <span className="max-w-[100px] truncate">
+            <span className="max-w-[15ch] truncate block">
               {modelName}
             </span>
           </Tooltip>
@@ -167,12 +246,20 @@ export const columns: ColumnDef<LogEntry>[] = [
   {
     header: "Internal User",
     accessorKey: "user",
-    cell: (info: any) => <span>{String(info.getValue() || "-")}</span>,
+    cell: (info: any) => (
+      <Tooltip title={String(info.getValue() || "-")}>
+        <span className="max-w-[15ch] truncate block">{String(info.getValue() || "-")}</span>
+      </Tooltip>
+    ),
   },
   {
     header: "End User",
     accessorKey: "end_user",
-    cell: (info: any) => <span>{String(info.getValue() || "-")}</span>,
+    cell: (info: any) => (
+      <Tooltip title={String(info.getValue() || "-")}>
+        <span className="max-w-[15ch] truncate block">{String(info.getValue() || "-")}</span>
+      </Tooltip>
+    ),
   },
 
   {
@@ -227,8 +314,12 @@ export const RequestResponsePanel = ({ request, response }: { request: any; resp
   const requestStr = typeof request === 'object' ? JSON.stringify(request, null, 2) : String(request || '{}');
   const responseStr = typeof response === 'object' ? JSON.stringify(response, null, 2) : String(response || '{}');
   
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const copyToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch (err) {
+      console.error('Failed to copy text: ', err);
+    }
   };
   
   return (

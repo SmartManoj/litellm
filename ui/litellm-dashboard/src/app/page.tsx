@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { jwtDecode } from "jwt-decode";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { defaultOrg } from "@/components/common_components/default_org";
-import { Team } from "@/components/key_team_helpers/key_list";
+import { KeyResponse, Team } from "@/components/key_team_helpers/key_list";
 import Navbar from "@/components/navbar";
 import UserDashboard from "@/components/user_dashboard";
 import ModelDashboard from "@/components/model_dashboard";
@@ -20,17 +20,30 @@ import PassThroughSettings from "@/components/pass_through_settings";
 import BudgetPanel from "@/components/budgets/budget_panel";
 import SpendLogsTable from "@/components/view_logs";
 import ModelHub from "@/components/model_hub";
+import NewUsagePage from "@/components/new_usage";
 import APIRef from "@/components/api_ref";
 import ChatUI from "@/components/chat_ui";
 import Sidebar from "@/components/leftnav";
 import Usage from "@/components/usage";
 import CacheDashboard from "@/components/cache_dashboard";
-import { setGlobalLitellmHeaderName } from "@/components/networking";
+import { proxyBaseUrl, setGlobalLitellmHeaderName } from "@/components/networking";
 import { Organization } from "@/components/networking";
 import GuardrailsPanel from "@/components/guardrails";
+import TransformRequestPanel from "@/components/transform_request";
 import { fetchUserModels } from "@/components/create_key_button";
 import { fetchTeams } from "@/components/common_components/fetch_teams";
-import { getUISessionDetails } from "@/utils/cookieUtils";
+import MCPToolsViewer from "@/components/mcp_tools";
+import TagManagement from "@/components/tag_management";
+import VectorStoreManagement from "@/components/vector_store_management";
+import { UiLoadingSpinner } from "@/components/ui/ui-loading-spinner";
+import { cx } from '@/lib/cva.config';
+
+function getCookie(name: string) {
+  const cookieValue = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(name + "="));
+  return cookieValue ? cookieValue.split("=")[1] : null;
+}
 
 function formatUserRole(userRole: string) {
   if (!userRole) {
@@ -69,6 +82,21 @@ interface ProxySettings {
 
 const queryClient = new QueryClient();
 
+function LoadingScreen() {
+  return (
+    <div className={cx("h-screen", "flex items-center justify-center gap-4")}>
+      <div className="text-lg font-medium py-2 pr-4 border-r border-r-gray-200">
+        🚅 LiteLLM
+      </div>
+      
+      <div className="flex items-center justify-center gap-2">
+        <UiLoadingSpinner className="size-4" />
+        <span className="text-gray-600 text-sm">Loading...</span>
+      </div>
+    </div>
+  );
+}
+
 export default function CreateKeyPage() {
   const [userRole, setUserRole] = useState("");
   const [premiumUser, setPremiumUser] = useState(false);
@@ -76,7 +104,7 @@ export default function CreateKeyPage() {
     useState(false);
   const [userEmail, setUserEmail] = useState<null | string>(null);
   const [teams, setTeams] = useState<Team[] | null>(null);
-  const [keys, setKeys] = useState<null | any[]>(null);
+  const [keys, setKeys] = useState<null | any[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [userModels, setUserModels] = useState<string[]>([]);
   const [proxySettings, setProxySettings] = useState<ProxySettings>({
@@ -88,8 +116,10 @@ export default function CreateKeyPage() {
   const searchParams = useSearchParams()!;
   const [modelData, setModelData] = useState<any>({ data: [] });
   const [token, setToken] = useState<string | null>(null);
+  const [createClicked, setCreateClicked] = useState<boolean>(false);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [userID, setUserID] = useState<string | null>(null);
 
-  const userID = searchParams.get("userID");
   const invitation_id = searchParams.get("invitation_id");
 
   // Get page from URL, default to 'api-keys' if not present
@@ -111,60 +141,81 @@ export default function CreateKeyPage() {
 
   const [accessToken, setAccessToken] = useState<string | null>(null);
 
+  const addKey = (data: any) => {
+    setKeys((prevData) => (prevData ? [...prevData, data] : [data]))
+    setCreateClicked(() => !createClicked);
+  } 
+  const redirectToLogin = authLoading === false && token === null && invitation_id === null;
+
   useEffect(() => {
-    const fetchSessionDetails = async () => {
-      try {
-        const sessionDetails = await getUISessionDetails();
-        // sessionDetails is already decoded, no need for jwtDecode
-        console.log("Session details:", sessionDetails);
-        
-        // Set access token to the session_id
-        setAccessToken(sessionDetails.session_id);
-        
-        setDisabledPersonalKeyCreation(
-          sessionDetails.disabled_non_admin_personal_key_creation,
-        );
-        
-        if (sessionDetails.user_role) {
-          const formattedUserRole = formatUserRole(sessionDetails.user_role);
-          console.log("User role:", formattedUserRole);
-          setUserRole(formattedUserRole);
-          if (formattedUserRole == "Admin Viewer") {
-            setPage("usage");
-          }
-        } else {
-          console.log("User role not defined");
-        }
-        
-        if (sessionDetails.user_email) {
-          setUserEmail(sessionDetails.user_email);
-        } else {
-          console.log("User Email is not set");
-        }
-        
-        if (sessionDetails.login_method) {
-          setShowSSOBanner(
-            sessionDetails.login_method == "username_password" ? true : false,
-          );
-        }
-        
-        if (sessionDetails.premium_user) {
-          setPremiumUser(sessionDetails.premium_user);
-        }
-        
-        if (sessionDetails.auth_header_name) {
-          setGlobalLitellmHeaderName(sessionDetails.auth_header_name);
-        }
-        
-        // Store the full session details as token for components that need it
-        setToken(JSON.stringify(sessionDetails));
-      } catch (error) {
-        console.error("Error fetching session details:", error);
-      }
-    };
-    
-    fetchSessionDetails();
+    const token = getCookie("token");
+    setToken(token);
+    setAuthLoading(false);
   }, []);
+
+  useEffect(() => {
+    if (redirectToLogin) {
+      window.location.href = (proxyBaseUrl || "") + "/sso/key/generate"
+    }
+  }, [redirectToLogin])
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    const decoded = jwtDecode(token) as { [key: string]: any };
+    if (decoded) {
+      // cast decoded to dictionary
+      console.log("Decoded token:", decoded);
+
+      console.log("Decoded key:", decoded.key);
+      // set accessToken
+      setAccessToken(decoded.key);
+
+      setDisabledPersonalKeyCreation(
+        decoded.disabled_non_admin_personal_key_creation,
+      );
+
+      // check if userRole is defined
+      if (decoded.user_role) {
+        const formattedUserRole = formatUserRole(decoded.user_role);
+        console.log("Decoded user_role:", formattedUserRole);
+        setUserRole(formattedUserRole);
+        if (formattedUserRole == "Admin Viewer") {
+          setPage("usage");
+        }
+      } else {
+        console.log("User role not defined");
+      }
+
+      if (decoded.user_email) {
+        setUserEmail(decoded.user_email);
+      } else {
+        console.log(`User Email is not set ${decoded}`);
+      }
+
+      if (decoded.login_method) {
+        setShowSSOBanner(
+          decoded.login_method == "username_password" ? true : false,
+        );
+      } else {
+        console.log(`User Email is not set ${decoded}`);
+      }
+
+      if (decoded.premium_user) {
+        setPremiumUser(decoded.premium_user);
+      }
+
+      if (decoded.auth_header_name) {
+        setGlobalLitellmHeaderName(decoded.auth_header_name);
+      }
+
+      if (decoded.user_id) {
+        setUserID(decoded.user_id);
+      }
+    }
+  }, [token]);
   
   useEffect(() => {
     if (accessToken && userID && userRole) {
@@ -178,9 +229,12 @@ export default function CreateKeyPage() {
     }
   }, [accessToken, userID, userRole]);
 
+  if (authLoading || redirectToLogin) {
+    return <LoadingScreen />
+  }
 
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense fallback={<LoadingScreen />}>
       <QueryClientProvider client={queryClient}>
         {invitation_id ? (
           <UserDashboard
@@ -195,6 +249,8 @@ export default function CreateKeyPage() {
             setTeams={setTeams}
             setKeys={setKeys}
             organizations={organizations}
+            addKey={addKey}
+            createClicked={createClicked}
           />
         ) : (
           <div className="flex flex-col min-h-screen">
@@ -205,6 +261,7 @@ export default function CreateKeyPage() {
               userEmail={userEmail}
               setProxySettings={setProxySettings}
               proxySettings={proxySettings}
+              accessToken={accessToken}
             />
             <div className="flex flex-1 overflow-auto">
               <div className="mt-8">
@@ -228,6 +285,8 @@ export default function CreateKeyPage() {
                   setTeams={setTeams}
                   setKeys={setKeys}
                   organizations={organizations}
+                  addKey={addKey}
+                  createClicked={createClicked}
                 />
               ) : page == "models" ? (
                 <ModelDashboard
@@ -283,8 +342,10 @@ export default function CreateKeyPage() {
                   setTeams={setTeams}
                   searchParams={searchParams}
                   accessToken={accessToken}
+                  userID={userID}
                   showSSOBanner={showSSOBanner}
                   premiumUser={premiumUser}
+                  proxySettings={proxySettings}
                 />
               ) : page == "api_ref" ? (
                 <APIRef proxySettings={proxySettings} />
@@ -299,7 +360,9 @@ export default function CreateKeyPage() {
                 <BudgetPanel accessToken={accessToken} />
               ) : page == "guardrails" ? (
                 <GuardrailsPanel accessToken={accessToken} />
-              ) : page == "general-settings" ? (
+              ): page == "transform-request" ? (
+                <TransformRequestPanel accessToken={accessToken} />
+              ): page == "general-settings" ? (
                 <GeneralSettings
                   userID={userID}
                   userRole={userRole}
@@ -333,8 +396,35 @@ export default function CreateKeyPage() {
                   userRole={userRole}
                   token={token}
                   accessToken={accessToken}
+                  allTeams={teams as Team[] ?? []}
                 />
-              ) : (
+              ) : page == "mcp-tools" ? (
+                <MCPToolsViewer
+                  accessToken={accessToken}
+                  userRole={userRole}
+                  userID={userID}
+                />
+              ) : page == "tag-management" ? (
+                <TagManagement
+                  accessToken={accessToken}
+                  userRole={userRole}
+                  userID={userID}
+                />
+              ) : page == "vector-stores" ? (
+                <VectorStoreManagement
+                  accessToken={accessToken}
+                  userRole={userRole}
+                  userID={userID}
+                />
+              ) : page == "new_usage" ? (
+                <NewUsagePage
+                  userID={userID}
+                  userRole={userRole}
+                  accessToken={accessToken}
+                  teams={teams as Team[] ?? []}
+                />
+              ) : 
+              (
                 <Usage
                   userID={userID}
                   userRole={userRole}
